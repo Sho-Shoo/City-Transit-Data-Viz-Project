@@ -1,0 +1,184 @@
+---
+title: "Classification and Feature Analysis of Transits Using Continuous variables"
+author: "Tianze (Steven) Shou"
+date: "4/29/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(dendextend)
+library(factoextra) 
+library(dplyr)
+library(countrycode)
+
+transit_cost <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2021/2021-01-05/transit_cost.csv')
+```
+
+## Topic Introduction 
+
+From the above EDA section, one can observe some differences and similarities between different groups of urban transits. For example, the North American countries, i.e., the United States and Canada, are building the most expensive transits per kilometer in the world; the United Kingdom retains the largest number of city transits that are connected with railroad. These clues in exploratory level analysis suggests that there may be some clusters of city transits that retain similar characteristics and that some features of the transits may be tightly correlated with one another. 
+
+In this section, we are going to explore the potential clusters of these transits, the hidden correlation behind the quantitative variables, and the deterministic effect of each of the quantitative variables. 
+
+## Data Clean-up and Variable Selection
+
+We first wish to remove the incomplete cases in the dataset. Since this dataset is found out in the wilderness, it is not as clean and tidy as some other we used in class. Therefore, we remove the rows with NA's or missing values for consistent measurement for further analysis. 
+
+```{r}
+transit_cost_complete = transit_cost[complete.cases(transit_cost),]
+```
+
+For the PCA and clustering analysis, we are going to only use the quantitative variables from the original transit cost dataset, therefore, dropping columns: `e`, `country`, `line`, `city`, `rr`, `source1`, `currency`, `source2`, and `reference`. Since the column `cost` represents the cost of the individual transit in local currency, which cannot be globally compared across the entire dataset, we are going to drop this column as well. Below is a segment of the dataset we are going to be dealing with for the rest of this report, which retains 427 observations from 10 quantitative variables. We also have to transform some character columns to numeric. 
+
+```{r}
+# remove the categorical columns 
+transit_cost_quant = transit_cost_complete %>% select(-e, -country, -city, -rr, 
+                                                      -source1, -currency, 
+                                                      -source2, -reference, 
+                                                      -cost, -line)
+
+# transform character columns to numeric
+transit_cost_quant$start_year = as.numeric(transit_cost_quant$start_year) 
+transit_cost_quant$end_year = as.numeric(transit_cost_quant$end_year)
+transit_cost_quant$real_cost = as.numeric(transit_cost_quant$real_cost) 
+# get rid of the % sign for tunnel_per column 
+transit_cost_quant$tunnel_per =  substr(transit_cost_quant$tunnel_per, 
+                                 1, str_length(transit_cost_quant$tunnel_per)-1)
+transit_cost_quant$tunnel_per = as.numeric(transit_cost_quant$tunnel_per) / 100
+
+# remove row 409, which contains end year data denoted as "X"
+transit_cost_quant = transit_cost_quant[-c(409),]
+transit_cost_complete = transit_cost_complete[-c(409),]
+
+head(transit_cost_quant)
+```
+
+## Complete Linkage Clustering and Dendogram 
+
+We will firstly have to standardize the columns of our cleaned-up dataset. Here is the first a few rows of the resulting standardized dataset: 
+
+```{r}
+standardize = function(vec){
+  return( vec/sd(vec) ) 
+}
+transit_cost_quant = data.frame(apply(transit_cost_quant, 2, FUN=standardize))
+head(transit_cost_quant)
+```
+
+Next up, we calculate the distance matrix that will be necessary for the clustering algorithm. 
+
+```{r}
+transit_dist = dist(transit_cost_quant)
+```
+
+Using this distance matrix, our clustering algorithm can be applied to the transit dataset with continuous variable. Unlike single linkage where a long, continuous line of data points may be grouped as one cluster, complete linkage clustering has a stronger ability to prevent overfitting. 
+
+```{r}
+transit_hc = hclust(transit_dist, method="complete")
+transit_dend <- as.dendrogram(transit_hc)
+plot(transit_dend)
+```
+
+By the shape of this naive clustering dendogram, the distribution of the data points in higher dimensional space retains the shape wherea largea amount of data forms a dense center, and some smaller clusters form in the outskirts. 
+
+Let's also explore how well our clustering algorithm classification of the transits align with their lcoations in various continents. Here, we are going to use the `countrycode` library to add a `countrycode` label to our dataset. By coloring `countrycode` to the x-axis labels, we can see how out clustering algorithm matches to continent classification. Since there exists five unique continents (i.e., Americas, Europe, Asia, Oceania, and Africa) in the dataset, and since an overwhelming number of data comes from China, we are going to adopt 6 clusters, the five continents and China in separate. 
+
+```{r}
+# mutate a column denoting continent
+transit_cost_complete = transit_cost_complete %>% 
+                      mutate(continent = countrycode(sourcevar = country, 
+                                                     origin = "iso2c",
+                                                     destination = "continent")) 
+# the country code UK cannot be well translated somehow, going to manually 
+# enter value here 
+# also manually change the continent encoding for China here
+# loop through the complete dataset to find country UK and China
+for(i in 1:length(transit_cost_complete$e)){
+  if(transit_cost_complete[i,]$country == "UK"){
+    # if UK found, enter continent as Europe
+    transit_cost_complete[i,]$continent = "Europe"
+  }
+  if(transit_cost_complete[i,]$country == "CN"){
+    # if CN, found manually enter as China 
+    transit_cost_complete[i,]$continent = "China"
+  }
+}
+
+# color scheme for each continents
+continents = c("Americas", "Europe", "China", "Oceania", "Africa", "Asia") 
+colors =     c("green",    "grey",   "red",   "blue",    "black",  "yellow") 
+
+# variable to store the color for each data point
+continent_colors = rep(NA, length(transit_cost_complete$continent))
+for(i in 1:length(transit_cost_complete$continent)){
+  # find the continent corresponds to which color
+  index = which(continents == transit_cost_complete$continent[i])
+  # set the data point to the correct color
+  continent_colors[i] = colors[index]
+}
+
+# 5 clusters since there are 5 continents in the dataset
+transit_dend <- set(transit_dend, "branches_k_color", k = 5)
+# pass in the color scheme
+transit_dend <- set(transit_dend, "labels_colors", 
+                    order_value = TRUE, continent_colors) 
+plot(transit_dend)
+```
+
+[NOTE] Color scheme adopted in the label: 
+
++ Americas: Green; 
++ Europe: Grey; 
++ China: Red; 
++ Oceania: Blue; 
++ Africa: Black; 
++ Asia: Yellow; 
+
+Based on our complete-linkage unsupervised clustering model, the continent label roughly align with the clusters in some degrees. For example, the majority of Chinese transits (denoted as red) together with other Asian transits, is clustered in the most center large cluster (denoted as purple in the dendogram). A large number of European transit lines (denoted as grey) are also in the most center cluster. On the other hand, some transits from the Americas (denoted as green) form a distinct cluster by themselves on the left side of the dendogram, far away in distance from the major cluster in purple. 
+
+## Analysis Deterministic COntinuous Variables and Their Relationships
+
+Since we are processing high-dimensional data, dimension reduction would be necessary to answer the question which variables are more deterministic in differentianting between different transits. For this section, a traditional dimension reduction strategy, Principle Component Analysis, will be applied to the `transit_cost_quant` dataset. 
+
+```{r}
+transit_pca <- prcomp(transit_cost_quant,
+                      center = TRUE, scale. = TRUE)
+summary(transit_pca)
+# get the PC matrix 
+transit_pc_matrix <- transit_pca$x
+head(transit_pc_matrix)
+
+# transcribe PCA matrix data into the original dataset
+transit_cost_quant <- transit_cost_quant %>%
+                        mutate(pc1 = transit_pc_matrix[,1],
+                               pc2 = transit_pc_matrix[,2],
+                               pc3 = transit_pc_matrix[,3])
+```
+
+As one can expect, the amount of variation in the original data set that can be explain by each PC diminishes for the later PC's. With PC1 accounting for 35.14% of variance by itself, 26.24% for PC2, and 12.85% for PC3, further analysis will only need to incorporate the first 2 to 3 PC's. This fact can be further demonstrated by the elbow plot below:
+
+```{r}
+fviz_eig(transit_pca, addlabels = TRUE)
+```
+
+As one can tell, the elbow occurs approximately between dimension 2 and dimension 3. However, for further analysis, only 2 PC's will be used. 
+
+Are these continuous variables somehow correlated? And how strong do they distinguish various transits and explain the variation in different transits? To answer these questions, a biplot is drawn below with package `factoextra`. 
+
+```{r}
+fviz_pca_biplot(transit_pca, label = "var", 
+                # Change the alpha for the observations - 
+                # which is represented by ind
+                alpha.ind = .25,
+                # Modify the alpha for the variables (var):
+                alpha.var = .75,
+                # Modify the color of the variables
+                col.var = "red")
+```
+
+There are three clear-defined variables groups in the biplot. The time variables: `start_year`, `end_year`, and `year` forms a tight group pointing to the second quadrant. Constrcution scale related variables like `real_cost`, `length`, `tunnel`, and `stations` form another closely binded group pointing to the third quandrant. Both of the first two groups contains vectors of large magnitude, signifying strong correlation with PC1 and PC2. The third group involves `cost_km_millions`, `ppp_rate`, and `tunnel_per`, which are weaker vectors lying in the vincinity of the origin. 
+
+There are few key observations from the plot. The construction scale related variables are all strongly positively correlated with each other, so longer transit lines tend to have more stations, more tunnels, and cost more. The construction scale variables also have strong magnitude. They are deterministic variables in the variance in the original dataset. This property is also shared with the time/year variables in the dataset. Another key observation is that the time vector and construction scale vectors are perpendicular to each other, meaning that they are uncorrelated. The construction scale vector are pointing to the inverse direction as `ppp_rate`, suggesting that economies with higher purchasing power tend to do less in infrastructure construction. 
+

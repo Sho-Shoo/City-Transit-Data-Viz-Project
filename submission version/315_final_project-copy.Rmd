@@ -1,0 +1,466 @@
+---
+title: "36315 Final Project"
+author: "Roxena Liu, Steven Shou, Victor Wen, Irene Gao"
+date: "4/26/2022"
+output: html_document
+---
+# Load Dataset
+```{r setup, include=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# install.packages("countrycode")
+# install.packages("maps")
+library(countrycode)
+library("maptools")
+library(tidyverse)
+library(dendextend)
+library(factoextra) 
+library(dplyr)
+library(ggplot2)
+library(readr)
+
+# load world country region polygon data 
+map.world <- map_data('world') 
+
+# load project dataset 
+transit_cost <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2021/2021-01-05/transit_cost.csv')
+```
+
+# Data Description and Overview: 
+
+Why do transit-infrastructure projects in New York cost 20 times more on a per kilometer basis than in Seoul? While New York is one of the most well-developed country in the world, this outcome is really surprising. What might be the reason of such a big difference? We want to investigate this question using the dataset called 'transit_cost'. It includes hundreds of transit projects, spans over more than 50 countries, and in total cover more than 11,000 km of urban rail since tha late 1990s. 
+
+## Overall Theme:
+The goal of this report is to help provide statistical support for possible strategies to deliver more economically and timely efficient, as well as high-capacity, transit projects for different countries. We might specifically want to explore this problem by approaching it from three different perspectives: 
+  1. For the first part of our report, we want to explore the factors that relates to the construction period, that is, time efficiency of transit projects. 
+  2. For the second part, we want to see if economic inflation of the country affects our transit projects. More specifically, we narrowed our exploration down to the relationship between number of stations and purchasing power of each city on average. 
+  3. For the very last part, we want to explore relationships in a higher dimensional space through clustering. And also try to figure out what continuous variables are deterministic and how do they relate. 
+  
+
+
+Our dataset transit_cost have 544 unique tranist projects along with 20 features. For instance, we have the features that indicates the location of our transit project like country, city, and line; we also have varaibels that describe the status of those transit projects, including start_year, end_year, rr, length, tunel_per, tunel, and stations; other variables provide some economic content like cost_kn_millions, cost, currency, ppp_rate, real_cost, etc.  
+
+In the following code chunk, we show all 20 variables in transit_cost: 
+
+```{r, echo=FALSE, warning=FALSE}
+dim(transit_cost)
+colnames(transit_cost)
+```
+
+Definitions of Variables: 
+- _rr_: if the transit project is a railroad or not. 1==railroad
+- _tunnel_per_: percent of length completed 
+- _ppp_rate_: purchasing power parity (PPP), based on the midpoint of construction
+- _real_cost_: real cost of the transit project in Millions of USD 
+- _cost_km_millions_: cost/km in millions of USD 
+- _stations_: number of stations where passengers can board/leave per location (city)
+
+
+## Exploratory Data Analysis: 
+First things first, we will do some exploratory data analysis. The following code chunk generates the number of transit projects in each country. We can see that China has the highest count up to 253, while most other countries are about 5 or lower. 
+
+```{r, echo=FALSE, warning=FALSE}
+table(transit_cost$country)
+```
+
+Since the goal of constructing tranists is to build connections between different regions, plotting the values onto a map might be a good way to visualize and better convey the distribution. 
+
+In the following code chunk, we plot the average cost per kilometer (ie, the variable _cost_per_km_) onto the world map. 
+
+According to the graph, we can see that southern parts in North America have the highest cost per kilometer of construction (about 900 or higher), while some Europe Countries have the lowest cost (approximately below 150 Million per km). Costs in the regions adjacent to China, Russia, and South America were also relatively low, approximately below 600 millions per km. 
+
+According to the descriptive map, we perceived a difference in average cost per kilometer by each country. In the following of our report, we might want to find out if there are any variables contributes to such a difference. 
+```{r linewidth=80, echo=FALSE, warning=FALSE}
+# summary dataset that summarizes the average cost per km
+transit_mean_cost = transit_cost %>% 
+                group_by(country) %>% 
+                summarise(cost_per_km = mean(cost_km_millions))   
+
+map.world = map.world %>% mutate(country_code = countrycode(region, 
+                                                            origin = 'country.name', 
+                                                            destination = 'iso2c'))
+
+# left join with map dataset 
+map_transit_mean_cost <- left_join(map.world, transit_mean_cost, 
+                                   by = c("country_code" = "country")) 
+
+# map the countries by transit count colored 
+ggplot(map_transit_mean_cost, aes(x = long, y = lat, group = group)) +
+  geom_polygon(aes(fill = cost_per_km)) + 
+  labs(title = "Average cost per kilometer by country") + 
+  scale_fill_gradient(low = "#0A00FF", high = "#FF0000")
+```
+
+# Question 1: What factors determine the Construction Period?
+
+For this section of the project, we will do some research on what predicts the construction time for different proposed lines. It's important to know what factors might affect the construction time, because shortening the construction time will help reduce the cost of building transits throughout the cities. In the transit cost dataset, the variables that might be correlated with the construction time are the length of the proposed line, number of stations and whether the line is a railroad. With these variables in hand, we would like to explore if these variables are correlated with the construction time or if there're other factors out of this dataset are affecting the construction time. 
+
+
+```{r, echo=FALSE, warning=FALSE}
+transit <- transit_cost
+```
+
+We first made the start_year and end_year into numerical variables, then we make the the construction period to categorical variable. 
+```{r, echo=FALSE, warning=FALSE}
+transit$start_year <- as.numeric(transit$start_year)
+transit$end_year <- as.numeric(transit$end_year)
+
+transit$constructionYear <- transit$end_year - transit$start_year 
+
+transit$construcPeriod <- ifelse(transit$constructionYear <= 2, "One to Two years", ifelse(transit$constructionYear<=4, "Two to Four Years", ifelse(transit$constructionYear <= 6, "Four to Six Years", ifelse(transit$constructionYear <= 8, "Six to Eight Years", ifelse(transit$constructionYear <= 10, "Eight to 10 Years", ifelse(transit$constructionYear <= 22, "More than 10 years", "Not complete"))))))
+
+positions <- c("One to Two years", "Two to Four Years", "Four to Six Years","Six to Eight Years","Eight to 10 Years", "More than 10 years","Not complete")
+
+ggplot(data = transit, aes(x = construcPeriod)) +
+  geom_bar(fill = "pink") +
+  labs(
+    title = "Distribution of Construction Period",
+    x = "Construction Period",
+    y = "Number of Cities"
+  )+ 
+  scale_x_discrete(limits = positions) + 
+  theme(axis.text.x = element_text(angle = 45))
+```
+The graph above shows the distribution of construction period. For most cities, the proposed lines were built with in six years. There's a peak from the period of four to six years. More than 150 of the proposed lines were built within four to six years. The least proportion of the construction period is one to two years, in which there's only less than 25 lines that were built with in one to two years. It looks like the distribution is right-skewed. 
+
+```{r, echo=FALSE, warning=FALSE}
+#line graph for only all cities
+mean_transit2 <- group_by(transit,construcPeriod) %>%
+             summarise(meanlength = mean(length, na.rm = TRUE))
+ggplot(na.omit(mean_transit2), aes(x = factor(construcPeriod), y = meanlength, color)) +
+  geom_point() + 
+  geom_line(aes(group=1)) +
+  labs(
+      title = "Construction Period and the Average Length") +
+  xlab("Construction Period") +
+  ylab("Average Length") +
+  scale_x_discrete(limits = positions) + 
+  theme(axis.text.x = element_text(angle = 45))
+```
+The graph above shows the different construction period and the average line length correspond to that period. There're some outliers in the line graph above, the average length is not steadily increasing as the construction period increases. For the period one to six years, the average length increases steadily as the construction period increases. However, the length dropped for 8 to 10 years, and then increases again for more than 10 years. I think this is because there might be other factors affecting the construction years, such as weather condition, or lack of labor.
+
+```{r, echo=FALSE, warning=FALSE}
+transit$lengthOfTunnel <- ifelse(transit$length <= 20, "0-20km", ifelse(transit$length <= 40, "20-40km", ifelse(transit$length <= 60, "40-60km", ifelse(transit$length <= 80, "60-80km", "80-100km"))))
+
+example <- transit %>%
+          filter(construcPeriod %in% c("One to Two years", "Two to Four Years", "Four to Six Years"))
+
+example2 <- example %>%
+          filter(lengthOfTunnel %in% c("0-20km", "20-40km", "40-60km"))
+
+table2<- table(example2$construcPeriod, example2$lengthOfTunnel)
+mosaicplot(table2, shade = TRUE)
+```
+For the mosaic plot above, I chose the categories one year to six year, and the length 0 to 60km because they have the highest proportion out of all the categories. We can see that for construction period from one to two years, there are a relatively high number of lines that are 0 - 20 km, and a relatively low number of lines from 20-40 km. This makes sense because shorter lines tends to have a shorter construction period. 
+
+```{r, echo=FALSE, warning=FALSE}
+transit$stationNum <- ifelse(transit$stations <= 20, "20 stations", ifelse(transit$stations<= 40, "40 stations", ifelse(transit$stations<=60, "60 stations", ifelse(transit$stations <= 80, "80 stations", "100 stations"))))
+
+table(transit$stationNum)
+# since most of the cities have 20 to 60 stations, we subset those into another group. 
+
+transit_subset <- transit %>%
+          filter(stationNum %in% c("20 stations","40 stations"))
+
+ggplot(transit_subset, aes(x=stations, y=constructionYear)) +
+  geom_point() +
+  geom_density2d() +
+  labs(
+    title = "Scatter plot of number of stations and construction years"
+  ) +
+  xlab("Number of stations") +
+  ylab("Construction Years")
+```
+The graph above compares the number of stations and the construction period. Most of the points are clustered at the bottom left corner, meaning most cities have around 0 to 10 stations with a construction time of 5 years. However, we do not see any correlations between stations and construction period. Thus, we can conclude that construction period does not depend on the number of stations. 
+
+```{r, echo=FALSE, warning=FALSE}
+#railroad grouping
+transit$railroad <- ifelse(transit$rr == 1, "yes", "no")
+
+transit$length<- as.numeric(transit$length)
+
+#line graph for cities with railroad and without
+mean_transit <- group_by(transit,construcPeriod, railroad) %>%
+             summarise(meanlength = mean(length, na.rm = TRUE))
+
+ggplot(na.omit(mean_transit), aes(x = factor(construcPeriod), y = meanlength, color = railroad)) +
+  geom_point() + 
+  geom_line(stat = "identity") + 
+  scale_x_discrete(limits = positions) + 
+  theme(axis.text.x = element_text(angle = 45))+
+  labs(
+    title = "Length of the Transit and Construction Period with and without Railroad"
+  ) +
+  xlab("Construction Period") +
+  ylab("Average Length")
+```
+
+For the graph above, we compared the average length of the transit corresponding to the different construction period. We can see a similar trends for both transits with railraod and without railroads. The only difference is that transits with railroads have a shorts average length for each construction period, meaning the the transits with railroad takes a longer time to construct. 
+
+
+# Question 2: What factors are related to economic inflation?
+
+## Topic Introduction 
+For this section of our project, we will take a look economic inflation. For the examination of economic inflation, we will use purchasing power parity rate from the transit data set, based on the midpoint of construction. Purchasing power parity or PPP is an economic theory that compares different countries' currencies through a "basket of goods" approach, similar to the Consumer Price Index or CPI. PPP rate allows comparison between economic productivity and standards of living between countries. With our variables in hand, we will try to see if the rate of economic inflation (PPP_rate) is correlated with the transit system. For this question, we will also use the number of stations (stations). With that being said, we load our data set and functions below. 
+
+Because there is an abundance of data sets but very few cities for large countries such as the United States, United Kingdom and others, we will filter the data set by narrowing down to one country with multiple cities and stations. For example, United States has only six cities with stations, but is roughly the same size as China in terms. Filtering through all the countries, China is the only large country with numerous cities available for examination. Due to this weakness in the data set, we will amend it by dividing the data set into Chinese cities, and non-Chinese cities, about a 50-50 split on the data (as the dimension function confirms below).
+
+
+## Q: Number of Stations
+
+```{r warning=FALSE, echo=FALSE}
+transit_CN = filter(transit, country == "CN")
+transit_other = filter(transit, country != "CN")
+
+dim(transit_CN)
+dim(transit_other)
+```
+
+
+Now, we will run two regression plots, one for Chinese cities, and one for other cities. For our regression model, we will define beta0 and beta1 as the definition below:
+
+**beta0** = The estimated PPP rate on average when there are no stations in a given city. 
+
+**beta1** = The estimated change in PPP rate on average by increasing one transit station in a given city.
+
+
+###  Chinese Cities
+
+```{r warning=FALSE, echo=FALSE}
+ggplot(transit_CN, aes(x = stations, y = ppp_rate)) +
+  geom_point(alpha = 0.5, color = "pink", size = 0.8) +
+  geom_smooth(method = "lm", se = TRUE, level = .99, color="pink", fill = "pink", size = 1.3) +
+  labs(
+ title = "Relation between PPP Rate and Number of Transit Stations in Chinese Cities",
+ x = "Number of Stations",
+ y = "PPP Rate"
+)
+```
+
+
+From the plot above, we observe a slightly increasing linear trend with number of stations and PPP rate. However, there are a lot of outliers outside the 99% confidence interval. Therefore, we will run a goodness of fit test for the linear regression model to see if the relationship is significant. 
+
+
+```{r warning=FALSE, echo=FALSE}
+mod_CN <- lm(ppp_rate ~ stations, data = transit_CN)
+summary(mod_CN)
+```
+
+
+From the goodness of fit test above, we observe that the p value for Beta1 or slope of the regression line is 0.0507, which is above our usual alpha level of 0.05. Therefore, for our test, we fail to reject the null hypothesis that there is no significant relationship between ppp_rate and number of stations in Chinese cities at a 95% confidence level. 
+
+
+###  Other Cities
+
+```{r warning=FALSE, echo=FALSE}
+ggplot(transit_other, aes(x = stations, y = ppp_rate)) +
+  geom_point(alpha = 0.5, color = "pink", size = 0.8) +
+  geom_smooth(method = "lm", se = TRUE, level = .99, color="pink", fill = "pink", size = 1.3) +
+  labs(
+ title = "Relation between PPP Rate and Number of Transit Stations in Other Cities",
+ x = "Number of Stations",
+ y = "PPP Rate"
+)
+```
+
+
+From the plot above, we observe a decreasing linear trend with number of stations and PPP rate for cities outside of China in general. There are a lot of outliers outside the 99% confidence interval. However, we note that most of the outliers are below the predicted regression line. Therefore, we will run a goodness of fit test again for the linear regression model to see if the relationship is significant. 
+
+
+```{r warning=FALSE, echo=FALSE}
+mod_other <- lm(ppp_rate ~ stations, data = transit_other)
+summary(mod_other)
+```
+
+From the goodness of fit test above, we observe that the p value for Beta1 or slope of the regression line is 0.0249, which is less than our usual alpha level of 0.05. Therefore, for our test, we reject the null hypothesis that there is no significant relationship between ppp_rate and number of stations in other cities at a 95% confidence level. 
+
+##  Summary
+To sum up our discovery for this question, we would suggest that there is a significant relationship between the number of stations and decreasing PPP rate for cities outside of China. Having more transit stations in a city is  significantly correlated at a 95% confidence level with decreasing PPP rate (decreasing inflation rate) for cities outside of China on average. However, we fail to arrive at a conclusive statement for the relationship of these two variables within Chinese cities. 
+
+
+# Question 3: How do the transit lines distribute in higher-dimensional space? 
+
+## Topic Introduction 
+
+From the above EDA section, one can observe some differences and similarities between different groups of urban transits. For example, the North American countries, i.e., the United States and Canada, are building the most expensive transits per kilometer in the world; the United Kingdom retains the largest number of city transits that are connected with railroad. These clues in exploratory level analysis suggests that there may be some clusters of city transits that retain similar characteristics and that some features of the transits may be tightly correlated with one another. 
+
+In this section, we are going to explore the potential clusters of these transits, the hidden correlation behind the quantitative variables, and the deterministic effect of each of the quantitative variables. 
+
+## Data Clean-up and Variable Selection
+We first wish to remove the incomplete cases in the dataset. Since this dataset is found out in the wilderness, it is not as clean and tidy as some other we used in class. Therefore, we remove the rows with NA's or missing values for consistent measurement for further analysis. 
+
+```{r, echo=FALSE, warning=FALSE}
+transit_cost_complete = transit_cost[complete.cases(transit_cost),]
+```
+
+For the PCA and clustering analysis, we are going to only use the quantitative variables from the original transit cost dataset, therefore, dropping columns: `e`, `country`, `line`, `city`, `rr`, `source1`, `currency`, `source2`, and `reference`. Since the column `cost` represents the cost of the individual transit in local currency, which cannot be globally compared across the entire dataset, we are going to drop this column as well. Below is a segment of the dataset we are going to be dealing with for the rest of this report, which retains 427 observations from 10 quantitative variables. We also have to transform some character columns to numeric. 
+
+```{r, echo=FALSE, warning=FALSE}
+# remove the categorical columns 
+transit_cost_quant = transit_cost_complete %>% select(-e, -country, -city, -rr, 
+                                                      -source1, -currency, 
+                                                      -source2, -reference, 
+                                                      -cost, -line)
+
+# transform character columns to numeric
+transit_cost_quant$start_year = as.numeric(transit_cost_quant$start_year) 
+transit_cost_quant$end_year = as.numeric(transit_cost_quant$end_year)
+transit_cost_quant$real_cost = as.numeric(transit_cost_quant$real_cost) 
+# get rid of the % sign for tunnel_per column 
+transit_cost_quant$tunnel_per =  substr(transit_cost_quant$tunnel_per, 
+                                 1, str_length(transit_cost_quant$tunnel_per)-1)
+transit_cost_quant$tunnel_per = as.numeric(transit_cost_quant$tunnel_per) / 100
+
+# remove row 409, which contains end year data denoted as "X"
+transit_cost_quant = transit_cost_quant[-c(409),]
+transit_cost_complete = transit_cost_complete[-c(409),]
+
+head(transit_cost_quant)
+```
+
+## Complete Linkage Clustering and Dendogram 
+
+We will firstly have to standardize the columns of our cleaned-up dataset. Here is the first a few rows of the resulting standardized dataset: 
+
+```{r, echo=FALSE, warning=FALSE}
+standardize = function(vec){
+  return( vec/sd(vec) ) 
+}
+transit_cost_quant = data.frame(apply(transit_cost_quant, 2, FUN=standardize))
+head(transit_cost_quant)
+```
+
+Next up, we calculate the distance matrix that will be necessary for the clustering algorithm. 
+
+```{r, echo=FALSE, warning=FALSE}
+transit_dist = dist(transit_cost_quant)
+```
+
+Using this distance matrix, our clustering algorithm can be applied to the transit dataset with continuous variable. Unlike single linkage where a long, continuous line of data points may be grouped as one cluster, complete linkage clustering has a stronger ability to prevent overfitting. 
+
+```{r, echo=FALSE, warning=FALSE}
+transit_hc = hclust(transit_dist, method="complete")
+transit_dend <- as.dendrogram(transit_hc)
+plot(transit_dend)
+```
+
+By the shape of this naive clustering dendogram, the distribution of the data points in higher dimensional space retains the shape wherea largea amount of data forms a dense center, and some smaller clusters form in the outskirts. 
+
+Let's also explore how well our clustering algorithm classification of the transits align with their lcoations in various continents. Here, we are going to use the `countrycode` library to add a `countrycode` label to our dataset. By coloring `countrycode` to the x-axis labels, we can see how out clustering algorithm matches to continent classification. Since there exists five unique continents (i.e., Americas, Europe, Asia, Oceania, and Africa) in the dataset, and since an overwhelming number of data comes from China, we are going to adopt 6 clusters, the five continents and China in separate. 
+
+```{r, echo=FALSE, warning=FALSE}
+# mutate a column denoting continent
+transit_cost_complete = transit_cost_complete %>% 
+                      mutate(continent = countrycode(sourcevar = country, 
+                                                     origin = "iso2c",
+                                                     destination = "continent")) 
+# the country code UK cannot be well translated somehow, going to manually 
+# enter value here 
+# also manually change the continent encoding for China here
+# loop through the complete dataset to find country UK and China
+for(i in 1:length(transit_cost_complete$e)){
+  if(transit_cost_complete[i,]$country == "UK"){
+    # if UK found, enter continent as Europe
+    transit_cost_complete[i,]$continent = "Europe"
+  }
+  if(transit_cost_complete[i,]$country == "CN"){
+    # if CN, found manually enter as China 
+    transit_cost_complete[i,]$continent = "China"
+  }
+}
+
+# color scheme for each continents
+continents = c("Americas", "Europe", "China", "Oceania", "Africa", "Asia") 
+colors =     c("green",    "grey",   "red",   "blue",    "black",  "yellow") 
+
+# variable to store the color for each data point
+continent_colors = rep(NA, length(transit_cost_complete$continent))
+for(i in 1:length(transit_cost_complete$continent)){
+  # find the continent corresponds to which color
+  index = which(continents == transit_cost_complete$continent[i])
+  # set the data point to the correct color
+  continent_colors[i] = colors[index]
+}
+
+# 5 clusters since there are 5 continents in the dataset
+transit_dend <- set(transit_dend, "branches_k_color", k = 5)
+# pass in the color scheme
+transit_dend <- set(transit_dend, "labels_colors", 
+                    order_value = TRUE, continent_colors) 
+plot(transit_dend)
+```
+
+[NOTE] Color scheme adopted in the x-axis label: 
+
++ Americas: Green; 
++ Europe: Grey; 
++ China: Red; 
++ Oceania: Blue; 
++ Africa: Black; 
++ Asia: Yellow; 
+
+Based on our complete-linkage unsupervised clustering model, the continent label roughly align with the clusters in some degrees. For example, the majority of Chinese transits (denoted as red) together with other Asian transits, is clustered in the most center large cluster (denoted as purple in the dendogram). A large number of European transit lines (denoted as grey) are also in the most center cluster. On the other hand, some transits from the Americas (denoted as green) form a distinct cluster by themselves on the left side of the dendogram, far away in distance from the major cluster in purple. 
+
+## Analysis Deterministic Continuous Variables and Their Relationships
+
+Since we are processing high-dimensional data, dimension reduction would be necessary to answer the question which variables are more deterministic in differentianting between different transits. For this section, a traditional dimension reduction strategy, Principle Component Analysis, will be applied to the `transit_cost_quant` dataset. 
+
+```{r, echo=FALSE, warning=FALSE}
+transit_pca <- prcomp(transit_cost_quant,
+                      center = TRUE, scale. = TRUE)
+summary(transit_pca)
+cat("\n")
+# get the PC matrix 
+transit_pc_matrix <- transit_pca$x
+head(transit_pc_matrix)
+
+# transcribe PCA matrix data into the original dataset
+transit_cost_quant <- transit_cost_quant %>%
+                        mutate(pc1 = transit_pc_matrix[,1],
+                               pc2 = transit_pc_matrix[,2],
+                               pc3 = transit_pc_matrix[,3])
+```
+
+As one can expect, the amount of variation in the original data set that can be explain by each PC diminishes for the later PC's. With PC1 accounting for 35.14% of variance by itself, 26.24% for PC2, and 12.85% for PC3, further analysis will only need to incorporate the first 2 to 3 PC's. This fact can be further demonstrated by the elbow plot below:
+
+```{r, echo=FALSE, warning=FALSE}
+fviz_eig(transit_pca, addlabels = TRUE)
+```
+
+As one can tell, the elbow occurs approximately between dimension 2 and dimension 3. However, for further analysis, only the first 2 PC's will be used. 
+
+Are these continuous variables somehow correlated? And how strong do they distinguish various transits and explain the variation in different transits? To answer these questions, a biplot is drawn below with package `factoextra`. 
+
+```{r, echo=FALSE, warning=FALSE}
+fviz_pca_biplot(transit_pca, label = "var", 
+                # Change the alpha for the observations - 
+                # which is represented by ind
+                alpha.ind = .25,
+                # Modify the alpha for the variables (var):
+                alpha.var = .75,
+                # Modify the color of the variables
+                col.var = "red")
+```
+
+There are three clear-defined variables groups in the biplot. The time variables: `start_year`, `end_year`, and `year` forms a tight group pointing to the second quadrant. Constrcution scale related variables like `real_cost`, `length`, `tunnel`, and `stations` form another closely binded group pointing to the third quandrant. Both of the first two groups contains vectors of large magnitude, signifying strong correlation with PC1 and PC2. The third group involves `cost_km_millions`, `ppp_rate`, and `tunnel_per`, which are weaker vectors lying in the vincinity of the origin. 
+
+There are few key observations from the plot. The construction scale related variables are all strongly positively correlated with each other, so longer transit lines tend to have more stations, more tunnels, and cost more. The construction scale variables also have strong magnitude. They are deterministic variables in the variance in the original dataset. This property is also shared with the time/year variables in the dataset. Another key observation is that the time vector and construction scale vectors are perpendicular to each other, meaning that they are uncorrelated. The construction scale vector are pointing to the inverse direction as `ppp_rate`, suggesting that economies with higher purchasing power tend to do less in infrastructure construction. 
+
+# Future Work iscussion: 
+
+## Conclusion: 
+From the above work and analysis we have done, we can see that while considering the cost in time, we might want to take the length of transit projects into account, instead of using the number of stations. However, number of stations still matters because for cities outside of China, there shows a significantly decreasing correlation between the number of stations and country's purchasing power parity rate, which means it is related to the economic inflation rate of the country/city it belongs to. (Also, we note that the beta1 p-value for Chinese cities is only marginally above the significance level ~0.001. This could be marked significant result depending on modification to the significance level). Finally, when we explore the dataset from a broader view, we noticed that time variables, which describes the construction period and time, along with construction scale related variables, like `real_cost`, `length`, `tunnel`, and `stations`, each are strongly correlated with each other. However, the time vector and construction scale vector seem to be uncorrelated by reading the biplot. 
+
+
+## Future Work: 
+However, there are still more questions we want to address either by gathering more data, or by operating more models and analysis.  
+
+First of all, we are missing some variables that describes the success of these transit projects. It is important because normally we want to know the extent of usage of these railroads, for instance, passenger flow might be a good measurement to quantify whether the transit has high or low usage. With this kind of variables, we can explore whether higher cost is related to higher usage, and give reflection on whether it really worth that much to construct transits in certain regions. This question might be crucial and menaingful for local government or city planners that want to maximize the benefits of their investment. 
+
+Additionally, the collection method of the data set could be biased depending on the source. The lack of data for cities outside of China, and missing entries (NA's) in the data set is potentially problematic. Gathering unbiased data set with using a single source of information would be a better fit if given the chance to do so. 
+
+Lastly, we might want to apply some machine learning models to further explore the correlation between variables and make predictions if we feed them with sample data. For instance, while looking at what variables are correlated with high or low construction period, Decision Trees might be helpful because it provides us with a detailed algorithm of splitting on each variable to get a high or low construction period. This reflection is useful and important for researchers who want to see a transparent process of splitting inside models. 
+
+
+## Ending Note: 
+In all, we hope that our report will be a useful resource for elected officials, planners, researchers, journalists, and other people that are interested or passionate in transit-infrascture, and provide a meaningful statistical support or foundation for their further efforts.  
+

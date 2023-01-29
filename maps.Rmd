@@ -1,0 +1,101 @@
+---
+title: "36315 Project - Shou"
+author: "Tianze (Steven) Shou"
+date: "4/26/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# install.packages("countrycode")
+# install.packages("maps")
+library(countrycode)
+library("maptools")
+library("tidyverse")
+
+# load world country region polygon data 
+map.world <- map_data('world') 
+
+# load project dataset 
+transit_cost <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2021/2021-01-05/transit_cost.csv')
+```
+
+
+```{r linewidth=80}
+# THIS IS A MALFUNCTIONING IMPLEMENTATION 
+# load world country region polygon data 
+data("wrld_simpl")
+new_wrld <- fortify(wrld_simpl, region = "NAME") 
+
+new_wrld2 <- merge(new_wrld,new_tab, by.x = "id", by.y = "id")
+
+ggplot(data = new_wrld2, 
+       aes(x = long, y = lat, map_id = id, fill = region_num)) + 
+  geom_map(map = new_wrld, color = "Black") + 
+  theme(panel.background = element_rect(fill = "lightblue"),
+        panel.grid = element_blank(),
+        legend.position = "None") + 
+  xlim(-180,180) + ylim(-90,90)
+```
+
+
+```{r linewidth=80}
+# generate country code column 
+# for more information on countrycode(), please reference: 
+# https://medium.com/illumination/automatic-translation-of-country-names-and-country-codes-in-r-language-b6281c3435b5#:~:text=After%20translating%20all%20the%20country%20names%2C%20we%20needed,can%20also%20transform%20country%20names%20into%20two-letters%20coding%3A
+map.world = map.world %>% mutate(country_code = countrycode(region, 
+                                                            origin = 'country.name', 
+                                                            destination = 'iso2c'))
+
+# make summary of the total transit length for each country 
+transit_length = transit_cost %>% 
+                 group_by(country) %>% 
+                 summarise(total_transit_length = na.omit(sum(length)))
+
+# left join the two datasets 
+map_transit_length <- left_join(map.world, transit_length, 
+                                by = c('country_code' = 'country')) 
+
+# inspiration from blog post: 
+# https://www.sharpsightlabs.com/blog/map-oil-production-country-r/ 
+# map the countries by transit length colored 
+ggplot(map_transit_length, aes(x = long, y = lat, group = group)) +
+  geom_polygon(aes(fill = total_transit_length)) + 
+  labs(title = "Total transit line length by country") + 
+  scale_fill_gradient(low = "#0A00FF", high = "#FF0000")
+
+```
+
+```{r linewidth=80}
+# summary dataset that summarizes the number of transit lines in a country
+transit_count = transit_cost %>% 
+                group_by(country) %>% 
+                summarise(count = n())     
+
+# left join with map dataset 
+map_transit_count <- left_join(map.world, transit_count, 
+                                by = c('country_code' = 'country')) 
+
+# map the countries by transit count colored 
+ggplot(map_transit_count, aes(x = long, y = lat, group = group)) +
+  geom_polygon(aes(fill = count)) + 
+  labs(title = "Total transit line count by country") +
+  scale_fill_gradient(low = "#0A00FF", high = "#FF0000")
+```
+
+```{r linewidth=80}
+# summary dataset that summarizes the average cost per km
+transit_mean_cost = transit_cost %>% 
+                group_by(country) %>% 
+                summarise(cost_per_km = mean(cost_km_millions))   
+
+# left join with map dataset 
+map_transit_mean_cost <- left_join(map.world, transit_mean_cost, 
+                                   by = c('country_code' = 'country')) 
+
+# map the countries by transit count colored 
+ggplot(map_transit_mean_cost, aes(x = long, y = lat, group = group)) +
+  geom_polygon(aes(fill = cost_per_km)) + 
+  labs(title = "Average cost per kilometer by country") + 
+  scale_fill_gradient(low = "#0A00FF", high = "#FF0000")
+```
